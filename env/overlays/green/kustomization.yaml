@@ -1,16 +1,16 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ../../base
+- ../../base
 nameSuffix: -green
 labels:
-  - pairs:
-      color: green
-    includeSelectors: true
+- pairs:
+    color: green
+  includeSelectors: true
 configMapGenerator:
-  - name: nginx-page
-    files:
-      - index.html
+- name: nginx-page
+  files:
+  - index.html
 images:
-  - name: public.ecr.aws/nginx/nginx
-    newTag: 1.27.0
+- name: public.ecr.aws/nginx/nginx
+  newTag: 1.31.6
