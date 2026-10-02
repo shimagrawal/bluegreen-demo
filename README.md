@@ -50,7 +50,11 @@ Warehouse ─► Freight ─► preview Stage: new tag on idle color, nginx-prev
 
    Kargo never pushes to `main`. On the first `preview` promotion it creates two branches with the rendered manifests, `stage/preview` and `stage/live`, and the Argo CD apps track those. Until then the apps show "unable to resolve stage/…", which is expected.
 
-3. Promote any Freight to `preview` once. This creates the `stage/` branches and deploys everything.
+3. Promote the **oldest** Freight to `preview` once, to save the newer ones for the demo. This creates the `stage/` branches and deploys blue, green and `nginx-preview`.
+
+4. In the Argo CD UI, sync `bluegreen-live` once. The `preview` Stage isn't allowed to sync it, so the `nginx` Service doesn't exist until you do.
+
+   You now start with **blue** live on `1.27.0`, and green on the Freight from step 3.
 
 ## Demo
 
@@ -63,7 +67,7 @@ task port-forward-preview   # http://localhost:8081  (what you're testing)
 
 To reach a color directly, use `task port-forward-blue` (8082) or `task port-forward-green` (8083).
 
-The steps below assume **blue** is live.
+The steps below start from the state after setup: **blue** is live.
 
 1. **Release to preview.** Promote a newer Freight to `preview`. It deploys to **green** (because blue is live), and `nginx-preview` now points at green:
    - http://localhost:8081 shows **GREEN**, and `curl -sI localhost:8081 | grep Server` shows the new NGINX version
@@ -108,3 +112,5 @@ kargo login https://<your-kargo-instance-url> --sso
 argocd login <your-argocd-instance-host> --grpc-web
 task cleanup
 ```
+
+`task cleanup` also deletes the `stage/preview` and `stage/live` branches, so the next setup starts again from `main` (blue live, both colors on `1.27.0`).

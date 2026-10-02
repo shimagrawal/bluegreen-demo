@@ -5,7 +5,7 @@ metadata:
 spec:
   selector:
     app: nginx
-    color: green
+    color: blue
   ports:
     - port: 80
       targetPort: 80
