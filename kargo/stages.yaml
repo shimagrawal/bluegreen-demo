@@ -18,54 +18,138 @@ spec:
         - name: image
           value: public.ecr.aws/nginx/nginx
       steps:
+        # ./src: Kustomize sources (read only)
+        # ./out: rendered stage/preview branch (blue/, green/, preview/)
+        # ./live: rendered stage/live branch (read only)
+        # Missing branches are created empty on first use.
         - uses: git-clone
           config:
             repoURL: ${{ vars.repo }}
             checkout:
               - branch: main
-                path: ./repo
+                path: ./src
+              - branch: stage/preview
+                create: true
+                path: ./out
+              - branch: stage/live
+                create: true
+                path: ./live
 
-        # Which color is live right now?
+        # Which color is live? Before the first live promotion there is no
+        # rendered live Service yet, so render it from main.
         - uses: yaml-parse
-          as: live
+          as: probeLive
+          continueOnError: true
           config:
-            path: ./repo/env/overlays/live/service.yaml
+            path: ./live/live/service-nginx.yaml
             outputs:
               - name: color
                 fromExpression: spec.selector.color
 
-        # Deploy the new image to the idle color
+        - uses: kustomize-build
+          if: ${{ status('probeLive') == 'Errored' }}
+          config:
+            path: ./src/env/overlays/live
+            outPath: ./live/live
+
+        # ...and publish it, so the bluegreen-live app has a branch to track
+        # before the first live promotion. Only happens once.
+        - uses: git-commit
+          if: ${{ status('probeLive') == 'Errored' }}
+          config:
+            path: ./live
+            message: "live: initial render from main"
+
+        - uses: git-push
+          if: ${{ status('probeLive') == 'Errored' }}
+          config:
+            path: ./live
+            targetBranch: stage/live
+
+        - uses: yaml-parse
+          as: live
+          config:
+            path: ./live/live/service-nginx.yaml
+            outputs:
+              - name: color
+                fromExpression: spec.selector.color
+
+        # Keep the live color's rendered files as they are. On the first
+        # promotion they don't exist yet, so render them from main.
+        - uses: yaml-parse
+          as: probeActive
+          continueOnError: true
+          config:
+            path: "./out/${{ outputs.live.color }}/deployment-nginx-${{ outputs.live.color }}.yaml"
+            outputs:
+              - name: image
+                fromExpression: spec.template.spec.containers[0].image
+
+        - uses: kustomize-build
+          if: ${{ status('probeActive') == 'Errored' }}
+          config:
+            path: "./src/env/overlays/${{ outputs.live.color }}"
+            outPath: "./out/${{ outputs.live.color }}"
+
+        # Re-render the idle color with the new image, and point
+        # nginx-preview at it
+        - uses: delete
+          config:
+            paths:
+              - "./out/${{ outputs.live.color == 'blue' ? 'green' : 'blue' }}"
+              - ./out/preview
+
         - uses: kustomize-set-image
           config:
-            path: "./repo/env/overlays/${{ outputs.live.color == 'blue' ? 'green' : 'blue' }}"
+            path: "./src/env/overlays/${{ outputs.live.color == 'blue' ? 'green' : 'blue' }}"
             images:
               - image: ${{ vars.image }}
                 tag: ${{ imageFrom(vars.image).Tag }}
 
-        # Point nginx-preview at the idle color
         - uses: yaml-update
           config:
-            path: ./repo/env/overlays/preview/service.yaml
+            path: ./src/env/overlays/preview/service.yaml
             updates:
               - key: spec.selector.color
                 value: "${{ outputs.live.color == 'blue' ? 'green' : 'blue' }}"
 
+        - uses: kustomize-build
+          config:
+            path: "./src/env/overlays/${{ outputs.live.color == 'blue' ? 'green' : 'blue' }}"
+            outPath: "./out/${{ outputs.live.color == 'blue' ? 'green' : 'blue' }}"
+
+        - uses: kustomize-build
+          config:
+            path: ./src/env/overlays/preview
+            outPath: ./out/preview
+
         - uses: git-commit
           config:
-            path: ./repo
+            path: ./out
             message: "preview: ${{ imageFrom(vars.image).Tag }} on ${{ outputs.live.color == 'blue' ? 'green' : 'blue' }}"
 
         - uses: git-push
+          as: push
           config:
-            path: ./repo
+            path: ./out
+            targetBranch: stage/preview
 
         # Syncing the unchanged color is a no-op
         - uses: argocd-update
           config:
             apps:
               - name: bluegreen-blue
+                sources:
+                  - repoURL: ${{ vars.repo }}
+                    desiredRevision: ${{ outputs.push.commit }}
               - name: bluegreen-green
+                sources:
+                  - repoURL: ${{ vars.repo }}
+                    desiredRevision: ${{ outputs.push.commit }}
               - name: bluegreen-preview
+                sources:
+                  - repoURL: ${{ vars.repo }}
+                    desiredRevision: ${{ outputs.push.commit }}
 ---
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Stage
@@ -88,40 +172,63 @@ spec:
         - name: image
           value: public.ecr.aws/nginx/nginx
       steps:
+        # ./src: Kustomize sources (read only)
+        # ./out: rendered stage/live branch (live/)
+        # ./preview: rendered stage/preview branch (read only; exists once
+        #            anything has been promoted to preview)
         - uses: git-clone
           config:
             repoURL: ${{ vars.repo }}
             checkout:
               - branch: main
-                path: ./repo
+                path: ./src
+              - branch: stage/live
+                create: true
+                path: ./out
+              - branch: stage/preview
+                path: ./preview
 
-        # Which tag does each color run?
+        # Which image does blue run?
         - uses: yaml-parse
           as: blue
           config:
-            path: ./repo/env/overlays/blue/kustomization.yaml
+            path: ./preview/blue/deployment-nginx-blue.yaml
             outputs:
-              - name: tag
-                fromExpression: images[0].newTag
+              - name: image
+                fromExpression: spec.template.spec.containers[0].image
 
-        # Switch live traffic to the color running this Freight's tag
+        # Switch live traffic to the color running this Freight's image
         - uses: yaml-update
           config:
-            path: ./repo/env/overlays/live/service.yaml
+            path: ./src/env/overlays/live/service.yaml
             updates:
               - key: spec.selector.color
-                value: "${{ outputs.blue.tag == imageFrom(vars.image).Tag ? 'blue' : 'green' }}"
+                value: "${{ outputs.blue.image == vars.image + ':' + imageFrom(vars.image).Tag ? 'blue' : 'green' }}"
+
+        - uses: git-clear
+          config:
+            path: ./out
+
+        - uses: kustomize-build
+          config:
+            path: ./src/env/overlays/live
+            outPath: ./out/live
 
         - uses: git-commit
           config:
-            path: ./repo
-            message: "live: switch traffic to ${{ outputs.blue.tag == imageFrom(vars.image).Tag ? 'blue' : 'green' }} (${{ imageFrom(vars.image).Tag }})"
+            path: ./out
+            message: "live: switch traffic to ${{ outputs.blue.image == vars.image + ':' + imageFrom(vars.image).Tag ? 'blue' : 'green' }} (${{ imageFrom(vars.image).Tag }})"
 
         - uses: git-push
+          as: push
           config:
-            path: ./repo
+            path: ./out
+            targetBranch: stage/live
 
         - uses: argocd-update
           config:
             apps:
               - name: bluegreen-live
+                sources:
+                  - repoURL: ${{ vars.repo }}
+                    desiredRevision: ${{ outputs.push.commit }}

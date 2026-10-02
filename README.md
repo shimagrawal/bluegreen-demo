@@ -48,7 +48,9 @@ Warehouse ─► Freight ─► preview Stage: new tag on idle color, nginx-prev
    task setup
    ```
 
-3. In the Argo CD UI, sync the four apps (`bluegreen-blue`, `bluegreen-green`, `bluegreen-preview`, `bluegreen-live`) once.
+   Kargo never pushes to `main`. On the first `preview` promotion it creates two branches with the rendered manifests, `stage/preview` and `stage/live`, and the Argo CD apps track those. Until then the apps show "unable to resolve stage/…", which is expected.
+
+3. Promote any Freight to `preview` once. This creates the `stage/` branches and deploys everything.
 
 ## Demo
 
@@ -73,23 +75,25 @@ The steps below assume **blue** is live.
 
 4. **Roll back.** Promote the previous Freight straight to `live`. It's still running on the other color, so traffic switches back instantly.
 
-Check the commits on `main`:
-- each release changes `newTag` in one color's overlay and the color in `env/overlays/preview/service.yaml`
-- each switch is a one-line change to `spec.selector.color` in `env/overlays/live/service.yaml`
+Check the commits Kargo pushed. It never touches `main`; each Stage renders plain YAML into its own branch:
+- `stage/preview`: each release changes the image in one color's Deployment (`blue/` or `green/`) and the selector in `preview/service-nginx-preview.yaml`
+- `stage/live`: each switch is a one-line change to `spec.selector.color` in `live/service-nginx.yaml`
 
 > `kubectl port-forward svc/...` connects to a single pod when it starts, so it doesn't follow a selector change. Restart the port-forward after each promotion. Use a hard refresh (Cmd+Shift+R) in the browser to skip its cache.
+
+> To change the app (for example `env/base/`), commit it to `main`. The next `preview` promotion renders it onto the idle color; the color serving users isn't touched until you switch to it.
 
 ## Repository Structure
 
 ```text
 .
-├── env/
+├── env/                # Kustomize sources (main); Kargo renders them into stage/preview and stage/live
 │   ├── base/           # NGINX Deployment + Service, shared by both colors
 │   └── overlays/       # one Argo CD app each: bluegreen-<overlay>
-│       ├── blue/       # -blue suffix, color label, page, image tag   (updated by Stage preview)
-│       ├── green/      # same for green                               (updated by Stage preview)
-│       ├── preview/    # nginx-preview Service, the color being tested (updated by Stage preview)
-│       └── live/       # nginx Service users hit                      (updated by Stage live)
+│       ├── blue/       # -blue suffix, color label, page, start tag   (rendered by Stage preview)
+│       ├── green/      # same for green                               (rendered by Stage preview)
+│       ├── preview/    # nginx-preview Service, the color being tested (rendered by Stage preview)
+│       └── live/       # nginx Service users hit                      (rendered by Stage live)
 ├── argocd/             # ApplicationSet generating the four Argo CD apps
 ├── kargo/              # Project, Warehouse, Stages
 ├── secret.yaml         # Kargo Git credentials (filled from .env)

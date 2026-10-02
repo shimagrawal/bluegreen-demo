@@ -26,8 +26,8 @@ spec:
       project: default
       source:
         repoURL: ${GITOPS_REPO_URL}
-        targetRevision: main
-        path: env/overlays/{{ .overlay }}
+        targetRevision: stage/{{ .stage }}
+        path: "{{ .overlay }}"
       destination:
         name: ${ARGOCD_DESTINATION}
         namespace: bluegreen
