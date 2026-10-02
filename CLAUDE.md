@@ -16,20 +16,21 @@ Kubernetes-native blue-green demo driven by Kargo + Argo CD on the Akuity Platfo
 - Kargo Project `bluegreen-demo`, Stages `preview → live` (`kargo/stages.yaml`). Steps are inline in each Stage, no PromotionTask.
   - `preview`: `yaml-parse` the live color from `overlays/live/service.yaml`, `kustomize-set-image` in the *other* color's overlay, commit + push to `main`, `argocd-update` `bluegreen-blue` + `bluegreen-green` (syncing the unchanged color is a no-op).
   - `live`: `yaml-parse` `images[0].newTag` from `overlays/blue/kustomization.yaml`; if it equals the Freight's tag switch to blue, else green. `yaml-update` `overlays/live/service.yaml`, commit + push, `argocd-update` `bluegreen-live`.
-- Three Argo CD Applications (`argocd/applications.yaml`), `bluegreen-<overlay>`. `blue`/`green` are authorized for Stage `preview`, `live` for Stage `live`. None auto-sync; Kargo's `argocd-update` syncs them.
-- Kargo edits files directly on `main` (no rendered branches).
+- One ApplicationSet `bluegreen` (`argocd/applicationset.yaml`, list generator of overlay + stage) generates three Applications, `bluegreen-<overlay>`. Edit the ApplicationSet, not the apps. `blue`/`green` are authorized for Stage `preview`, `live` for Stage `live`. None auto-sync; Kargo's `argocd-update` syncs them.
+- Kargo edits files directly on `main` (no rendered branches). Both Stages push to the same branch, so `argocd-update` must **not** set `desiredRevision`: the other Stage's next commit moves the apps off that revision and Kargo marks the Stage Unhealthy even though Argo CD is Healthy.
 - Taskfile runs `envsubst` restricted to the `.env` variables (`SUBST` var), so `${{ }}` Kargo expressions are never touched.
 
 ## Status
 
-Written but **not yet tested** against a real Kargo/Argo CD instance (as of 2026-10-01). Verified only: YAML parses, `kustomize build` renders every overlay, with the same objects as the old plain manifests, Taskfile loads. Restructured on 2026-10-02 to base/ + blue/green/live overlays, 3 Argo CD apps, no `nginx-preview`.
+Tested on 2026-10-02: `preview` (1.31.6 → green) and `live` (switch to green) both promoted and worked end to end, so the `yaml-parse` / `kustomize-set-image` syntax and Git credentials are good. Not yet tested: a second release onto blue, rollback, and the `desiredRevision` fix below.
 
 If a promotion fails, check in this order:
-1. **`yaml-parse` output references.** Stages use `${{ outputs.live.color }}` / `${{ outputs.blue.tag }}`, and `fromExpression: images[0].newTag` for the kustomization. The Kargo docs page fetched was unclear on the exact syntax; this is the most likely thing to need fixing.
+1. **`yaml-parse` output references.** Stages use `${{ outputs.live.color }}` / `${{ outputs.blue.tag }}`, and `fromExpression: images[0].newTag` for the kustomization. Confirmed working on 2026-10-02.
 2. **`kustomize-set-image` config.** Uses `images[].image` + `tag`. If Kargo rejects `tag`, check the step's docs for the installed version.
 3. **Ternary expressions** (`outputs.live.color == 'blue' ? 'green' : 'blue'`) must stay double-quoted in YAML. Unquoted, the ` : ` breaks parsing.
 4. Git credentials: `secret.yaml` `repoURL` must match `GITOPS_REPO_URL` exactly, and the PAT needs write access.
-5. `argocd-update` "not authorized": annotation must be `bluegreen-demo:<stage>`.
+5. `argocd-update` "not authorized": annotation must be `bluegreen-demo:<stage>` (set in the ApplicationSet template).
+6. ApplicationSet not applied/generating: the ApplicationSet controller must be enabled on the Akuity Argo CD instance; if `akuity argocd apply` rejects the ApplicationSet kind, use `kubectl apply -n argocd` or `argocd appset create`.
 
 ## Known limitations
 

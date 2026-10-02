@@ -48,14 +48,14 @@ tasks:
         done
 
   apply-argocd:
-    desc: Apply Argo CD Applications
+    desc: Apply the Argo CD ApplicationSet
     deps:
       - check
     cmds:
       - |
         set -euo pipefail
 
-        envsubst '{{.SUBST}}' < argocd/applications.yaml | \
+        envsubst '{{.SUBST}}' < argocd/applicationset.yaml | \
           akuity argocd apply \
             -f - \
             --name "$AKUITY_ARGOCD_INSTANCE" \
@@ -65,8 +65,8 @@ tasks:
     desc: Set up the blue-green demo
     cmds:
       - task: check
-      - task: apply-kargo
       - task: apply-argocd
+      - task: apply-kargo
 
   port-forward-live:
     desc: Port-forward the live Service to localhost:8080
@@ -84,7 +84,7 @@ tasks:
       - kubectl port-forward svc/nginx-green 8082:80 -n bluegreen
 
   cleanup:
-    desc: Delete the Kargo Project and Argo CD Applications
+    desc: Delete the Kargo Project and Argo CD ApplicationSet
     cmds:
       - kargo delete project bluegreen-demo
-      - argocd app delete bluegreen-blue bluegreen-green bluegreen-live --yes
+      - argocd appset delete bluegreen --yes

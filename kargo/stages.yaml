@@ -43,7 +43,6 @@ spec:
                 tag: ${{ imageFrom(vars.image).Tag }}
 
         - uses: git-commit
-          as: commit
           config:
             path: ./repo
             message: "preview: ${{ imageFrom(vars.image).Tag }} on ${{ outputs.live.color == 'blue' ? 'green' : 'blue' }}"
@@ -57,13 +56,7 @@ spec:
           config:
             apps:
               - name: bluegreen-blue
-                sources:
-                  - repoURL: ${{ vars.repo }}
-                    desiredRevision: ${{ outputs.commit.commit }}
               - name: bluegreen-green
-                sources:
-                  - repoURL: ${{ vars.repo }}
-                    desiredRevision: ${{ outputs.commit.commit }}
 ---
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Stage
@@ -111,7 +104,6 @@ spec:
                 value: "${{ outputs.blue.tag == imageFrom(vars.image).Tag ? 'blue' : 'green' }}"
 
         - uses: git-commit
-          as: commit
           config:
             path: ./repo
             message: "live: switch traffic to ${{ outputs.blue.tag == imageFrom(vars.image).Tag ? 'blue' : 'green' }} (${{ imageFrom(vars.image).Tag }})"
@@ -124,6 +116,3 @@ spec:
           config:
             apps:
               - name: bluegreen-live
-                sources:
-                  - repoURL: ${{ vars.repo }}
-                    desiredRevision: ${{ outputs.commit.commit }}

@@ -79,7 +79,7 @@ Check the commits on `main`: each release changes `newTag` in one color's overla
 │       ├── blue/       # -blue suffix, color label, page, image tag   (updated by Stage preview)
 │       ├── green/      # same for green                               (updated by Stage preview)
 │       └── live/       # nginx Service users hit                      (updated by Stage live)
-├── argocd/             # the three Argo CD Applications
+├── argocd/             # ApplicationSet generating the three Argo CD apps
 ├── kargo/              # Project, Warehouse, Stages
 ├── secret.yaml         # Kargo Git credentials (filled from .env)
 ├── Taskfile.yaml
