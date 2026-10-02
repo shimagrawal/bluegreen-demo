@@ -1,0 +1,129 @@
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: preview
+  namespace: bluegreen-demo
+spec:
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: nginx
+      sources:
+        direct: true
+  promotionTemplate:
+    spec:
+      vars:
+        - name: repo
+          value: ${GITOPS_REPO_URL}
+        - name: image
+          value: public.ecr.aws/nginx/nginx
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: ${{ vars.repo }}
+            checkout:
+              - branch: main
+                path: ./repo
+
+        # Which color is live right now?
+        - uses: yaml-parse
+          as: live
+          config:
+            path: ./repo/env/overlays/live/service.yaml
+            outputs:
+              - name: color
+                fromExpression: spec.selector.color
+
+        # Deploy the new image to the idle color
+        - uses: kustomize-set-image
+          config:
+            path: "./repo/env/overlays/${{ outputs.live.color == 'blue' ? 'green' : 'blue' }}"
+            images:
+              - image: ${{ vars.image }}
+                tag: ${{ imageFrom(vars.image).Tag }}
+
+        - uses: git-commit
+          as: commit
+          config:
+            path: ./repo
+            message: "preview: ${{ imageFrom(vars.image).Tag }} on ${{ outputs.live.color == 'blue' ? 'green' : 'blue' }}"
+
+        - uses: git-push
+          config:
+            path: ./repo
+
+        # Syncing the unchanged color is a no-op
+        - uses: argocd-update
+          config:
+            apps:
+              - name: bluegreen-blue
+                sources:
+                  - repoURL: ${{ vars.repo }}
+                    desiredRevision: ${{ outputs.commit.commit }}
+              - name: bluegreen-green
+                sources:
+                  - repoURL: ${{ vars.repo }}
+                    desiredRevision: ${{ outputs.commit.commit }}
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: live
+  namespace: bluegreen-demo
+spec:
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: nginx
+      sources:
+        stages:
+          - preview
+  promotionTemplate:
+    spec:
+      vars:
+        - name: repo
+          value: ${GITOPS_REPO_URL}
+        - name: image
+          value: public.ecr.aws/nginx/nginx
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: ${{ vars.repo }}
+            checkout:
+              - branch: main
+                path: ./repo
+
+        # Which tag does each color run?
+        - uses: yaml-parse
+          as: blue
+          config:
+            path: ./repo/env/overlays/blue/kustomization.yaml
+            outputs:
+              - name: tag
+                fromExpression: images[0].newTag
+
+        # Switch live traffic to the color running this Freight's tag
+        - uses: yaml-update
+          config:
+            path: ./repo/env/overlays/live/service.yaml
+            updates:
+              - key: spec.selector.color
+                value: "${{ outputs.blue.tag == imageFrom(vars.image).Tag ? 'blue' : 'green' }}"
+
+        - uses: git-commit
+          as: commit
+          config:
+            path: ./repo
+            message: "live: switch traffic to ${{ outputs.blue.tag == imageFrom(vars.image).Tag ? 'blue' : 'green' }} (${{ imageFrom(vars.image).Tag }})"
+
+        - uses: git-push
+          config:
+            path: ./repo
+
+        - uses: argocd-update
+          config:
+            apps:
+              - name: bluegreen-live
+                sources:
+                  - repoURL: ${{ vars.repo }}
+                    desiredRevision: ${{ outputs.commit.commit }}

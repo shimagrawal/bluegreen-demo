@@ -1,0 +1,90 @@
+version: '3'
+
+dotenv:
+  - .env
+
+vars:
+  SUBST: '${GITOPS_REPO_URL} ${GITHUB_USERNAME} ${GITHUB_PAT} ${ARGOCD_DESTINATION}'
+
+tasks:
+
+  check:
+    desc: Check required environment variables
+    cmds:
+      - |
+        set -e
+
+        for var in \
+          AKUITY_ARGOCD_INSTANCE \
+          AKUITY_KARGO_INSTANCE \
+          AKUITY_ORG_NAME \
+          GITOPS_REPO_URL \
+          GITHUB_USERNAME \
+          GITHUB_PAT \
+          ARGOCD_DESTINATION
+        do
+          if [ -z "$(printenv "$var")" ]; then
+            echo "ERROR: $var is not set"
+            exit 1
+          fi
+        done
+
+        echo "✓ All required variables are set"
+
+  apply-kargo:
+    desc: Apply Kargo Project, Git credentials, Warehouse and Stages
+    deps:
+      - check
+    cmds:
+      - |
+        set -euo pipefail
+
+        for f in kargo/project.yaml secret.yaml kargo/warehouse.yaml kargo/stages.yaml; do
+          envsubst '{{.SUBST}}' < "$f" | \
+            akuity kargo apply \
+              -f - \
+              --name "$AKUITY_KARGO_INSTANCE" \
+              --org-name="$AKUITY_ORG_NAME"
+        done
+
+  apply-argocd:
+    desc: Apply Argo CD Applications
+    deps:
+      - check
+    cmds:
+      - |
+        set -euo pipefail
+
+        envsubst '{{.SUBST}}' < argocd/applications.yaml | \
+          akuity argocd apply \
+            -f - \
+            --name "$AKUITY_ARGOCD_INSTANCE" \
+            --org-name="$AKUITY_ORG_NAME"
+
+  setup:
+    desc: Set up the blue-green demo
+    cmds:
+      - task: check
+      - task: apply-kargo
+      - task: apply-argocd
+
+  port-forward-live:
+    desc: Port-forward the live Service to localhost:8080
+    cmds:
+      - kubectl port-forward svc/nginx 8080:80 -n bluegreen
+
+  port-forward-blue:
+    desc: Port-forward the blue Service to localhost:8081
+    cmds:
+      - kubectl port-forward svc/nginx-blue 8081:80 -n bluegreen
+
+  port-forward-green:
+    desc: Port-forward the green Service to localhost:8082
+    cmds:
+      - kubectl port-forward svc/nginx-green 8082:80 -n bluegreen
+
+  cleanup:
+    desc: Delete the Kargo Project and Argo CD Applications
+    cmds:
+      - kargo delete project bluegreen-demo
+      - argocd app delete bluegreen-blue bluegreen-green bluegreen-live --yes
