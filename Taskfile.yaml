@@ -73,15 +73,20 @@ tasks:
     cmds:
       - kubectl port-forward svc/nginx 8080:80 -n bluegreen
 
-  port-forward-blue:
-    desc: Port-forward the blue Service to localhost:8081
+  port-forward-preview:
+    desc: Port-forward the preview Service to localhost:8081
     cmds:
-      - kubectl port-forward svc/nginx-blue 8081:80 -n bluegreen
+      - kubectl port-forward svc/nginx-preview 8081:80 -n bluegreen
+
+  port-forward-blue:
+    desc: Port-forward the blue Service to localhost:8082
+    cmds:
+      - kubectl port-forward svc/nginx-blue 8082:80 -n bluegreen
 
   port-forward-green:
-    desc: Port-forward the green Service to localhost:8082
+    desc: Port-forward the green Service to localhost:8083
     cmds:
-      - kubectl port-forward svc/nginx-green 8082:80 -n bluegreen
+      - kubectl port-forward svc/nginx-green 8083:80 -n bluegreen
 
   cleanup:
     desc: Delete the Kargo Project and Argo CD ApplicationSet

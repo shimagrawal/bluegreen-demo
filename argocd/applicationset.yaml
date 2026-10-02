@@ -13,6 +13,8 @@ spec:
             stage: preview
           - overlay: green
             stage: preview
+          - overlay: preview
+            stage: preview
           - overlay: live
             stage: live
   template:

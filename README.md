@@ -4,17 +4,22 @@ A minimal, Kubernetes-native blue-green deployment driven by Kargo. No Argo Roll
 
 ## How it works
 
-Two copies of NGINX run side by side: `blue` and `green`, each with its own Service (`nginx-blue`, `nginx-green`). A third Service, `nginx`, is what users hit: it points at one color at a time.
+Two copies of NGINX run side by side: `blue` and `green`. Two Services choose between them by their `color` selector:
+
+- `nginx` (**live**) is what users hit.
+- `nginx-preview` (**preview**) points at the color being tested.
+
+Each color also has its own Service (`nginx-blue`, `nginx-green`) for reaching it directly.
 
 | Stage | What it does |
 |---|---|
-| `preview` | Reads which color is live and deploys the new image to the **other** color. Users aren't affected; test it on that color's own Service. |
-| `live` | Points the `nginx` Service at the color running this Freight's tag |
+| `preview` | Reads which color is live, deploys the new image to the **other** color, and points `nginx-preview` at it. Users aren't affected. |
+| `live` | Points `nginx` at the color running this Freight's tag |
 
 Releases alternate between colors: blue → green → blue. The previous version keeps running on the idle color, so rolling back is just another switch.
 
 ```text
-Warehouse ─► Freight ─► preview Stage: new tag on idle color ─► live Stage: nginx → that color
+Warehouse ─► Freight ─► preview Stage: new tag on idle color, nginx-preview → it ─► live Stage: nginx → that color
 ```
 
 ## Prerequisites
@@ -43,31 +48,36 @@ Warehouse ─► Freight ─► preview Stage: new tag on idle color ─► live
    task setup
    ```
 
-3. In the Argo CD UI, sync the three apps (`bluegreen-blue`, `bluegreen-green`, `bluegreen-live`) once. At the start, **blue** is live and both colors run `1.27.0`.
+3. In the Argo CD UI, sync the four apps (`bluegreen-blue`, `bluegreen-green`, `bluegreen-preview`, `bluegreen-live`) once.
 
 ## Demo
 
-Open three terminals:
+Open two terminals:
 
 ```bash
-task port-forward-live    # http://localhost:8080  (what users see)
-task port-forward-blue    # http://localhost:8081
-task port-forward-green   # http://localhost:8082
+task port-forward-live      # http://localhost:8080  (what users see)
+task port-forward-preview   # http://localhost:8081  (what you're testing)
 ```
 
-1. **Release to preview.** Promote a newer Freight to `preview`. It deploys to **green** (because blue is live):
-   - http://localhost:8082 shows **GREEN**, and `curl -sI localhost:8082 | grep Server` shows the new NGINX version
+To reach a color directly, use `task port-forward-blue` (8082) or `task port-forward-green` (8083).
+
+The steps below assume **blue** is live.
+
+1. **Release to preview.** Promote a newer Freight to `preview`. It deploys to **green** (because blue is live), and `nginx-preview` now points at green:
+   - http://localhost:8081 shows **GREEN**, and `curl -sI localhost:8081 | grep Server` shows the new NGINX version
    - http://localhost:8080 still shows **BLUE**
 
-2. **Switch live.** Promote the same Freight to `live`. The `nginx` Service now selects green, so http://localhost:8080 shows **GREEN**. Blue keeps running the old version.
+2. **Switch live.** Promote the same Freight to `live`. `nginx` now selects green, so http://localhost:8080 shows **GREEN**. Blue keeps running the old version.
 
 3. **Next release.** Promote the next Freight to `preview`. This time it goes to **blue**, because green is live. Promote it to `live` when it looks good.
 
 4. **Roll back.** Promote the previous Freight straight to `live`. It's still running on the other color, so traffic switches back instantly.
 
-Check the commits on `main`: each release changes `newTag` in one color's overlay (`env/overlays/<color>/kustomization.yaml`), and each switch is a one-line change to `spec.selector.color` in `env/overlays/live/service.yaml`.
+Check the commits on `main`:
+- each release changes `newTag` in one color's overlay and the color in `env/overlays/preview/service.yaml`
+- each switch is a one-line change to `spec.selector.color` in `env/overlays/live/service.yaml`
 
-> `kubectl port-forward svc/...` connects to a single pod when it starts, so it doesn't follow a selector change. Restart `port-forward-live` after each switch.
+> `kubectl port-forward svc/...` connects to a single pod when it starts, so it doesn't follow a selector change. Restart the port-forward after each promotion. Use a hard refresh (Cmd+Shift+R) in the browser to skip its cache.
 
 ## Repository Structure
 
@@ -78,8 +88,9 @@ Check the commits on `main`: each release changes `newTag` in one color's overla
 │   └── overlays/       # one Argo CD app each: bluegreen-<overlay>
 │       ├── blue/       # -blue suffix, color label, page, image tag   (updated by Stage preview)
 │       ├── green/      # same for green                               (updated by Stage preview)
+│       ├── preview/    # nginx-preview Service, the color being tested (updated by Stage preview)
 │       └── live/       # nginx Service users hit                      (updated by Stage live)
-├── argocd/             # ApplicationSet generating the three Argo CD apps
+├── argocd/             # ApplicationSet generating the four Argo CD apps
 ├── kargo/              # Project, Warehouse, Stages
 ├── secret.yaml         # Kargo Git credentials (filled from .env)
 ├── Taskfile.yaml
