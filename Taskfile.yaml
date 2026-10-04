@@ -88,6 +88,23 @@ tasks:
     cmds:
       - kubectl port-forward svc/nginx-green 8083:80 -n bluegreen
 
+  status:
+    desc: Show which color is live and which is in preview, with versions
+    silent: true
+    cmds:
+      - |
+        for row in "LIVE nginx" "PREVIEW nginx-preview"; do
+          set -- $row
+          c=$(kubectl get svc "$2" -n bluegreen -o jsonpath='{.spec.selector.color}')
+          v=$(kubectl get deploy "nginx-$c" -n bluegreen -o jsonpath='{.spec.template.spec.containers[0].image}' | cut -d: -f2)
+          printf "%-8s %-14s → %-6s %s\n" "$1" "$2" "$c" "$v"
+        done
+
+  watch-status:
+    desc: Refresh task status every 2 seconds
+    cmds:
+      - while true; do clear; task status; sleep 2; done
+
   cleanup:
     desc: Delete the Kargo Project, Argo CD ApplicationSet and the rendered stage branches
     cmds:

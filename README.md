@@ -58,19 +58,29 @@ Warehouse ─► Freight ─► preview Stage: new tag on idle color, nginx-prev
 
 ## Demo
 
-Open two terminals:
+Open three terminals:
 
 ```bash
 task port-forward-live      # http://localhost:8080  (what users see)
 task port-forward-preview   # http://localhost:8081  (what you're testing)
+task watch-status           # which color is live / in preview, and their versions
 ```
+
+`task watch-status` shows, refreshed every 2 seconds:
+
+```text
+LIVE     nginx          → blue   1.27.0
+PREVIEW  nginx-preview  → green  1.31.5
+```
+
+Each page also shows its color, the NGINX version it runs and the pod name.
 
 To reach a color directly, use `task port-forward-blue` (8082) or `task port-forward-green` (8083).
 
 The steps below start from the state after setup: **blue** is live.
 
 1. **Release to preview.** Promote a newer Freight to `preview`. It deploys to **green** (because blue is live), and `nginx-preview` now points at green:
-   - http://localhost:8081 shows **GREEN**, and `curl -sI localhost:8081 | grep Server` shows the new NGINX version
+   - http://localhost:8081 shows **GREEN** with the new NGINX version
    - http://localhost:8080 still shows **BLUE**
 
 2. **Switch live.** Promote the same Freight to `live`. `nginx` now selects green, so http://localhost:8080 shows **GREEN**. Blue keeps running the old version.
@@ -83,7 +93,7 @@ Check the commits Kargo pushed. It never touches `main`; each Stage renders plai
 - `stage/preview`: each release changes the image in one color's Deployment (`blue/` or `green/`) and the selector in `preview/service-nginx-preview.yaml`
 - `stage/live`: each switch is a one-line change to `spec.selector.color` in `live/service-nginx.yaml`
 
-> `kubectl port-forward svc/...` connects to a single pod when it starts, so it doesn't follow a selector change. Restart the port-forward after each promotion. Use a hard refresh (Cmd+Shift+R) in the browser to skip its cache.
+> `kubectl port-forward svc/...` connects to a single pod when it starts, so it doesn't follow a selector change. Restart the port-forward after each promotion. The pages are served with `Cache-Control: no-store`, so a normal refresh is enough.
 
 > To change the app (for example `env/base/`), commit it to `main`. The next `preview` promotion renders it onto the idle color; the color serving users isn't touched until you switch to it.
 
@@ -92,7 +102,7 @@ Check the commits Kargo pushed. It never touches `main`; each Stage renders plai
 ```text
 .
 ├── env/                # Kustomize sources (main); Kargo renders them into stage/preview and stage/live
-│   ├── base/           # NGINX Deployment + Service, shared by both colors
+│   ├── base/           # NGINX Deployment + Service + nginx config, shared by both colors
 │   └── overlays/       # one Argo CD app each: bluegreen-<overlay>
 │       ├── blue/       # -blue suffix, color label, page, start tag   (rendered by Stage preview)
 │       ├── green/      # same for green                               (rendered by Stage preview)
