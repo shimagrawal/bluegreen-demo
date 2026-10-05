@@ -18,7 +18,7 @@ spec:
         color: green
     spec:
       containers:
-      - image: public.ecr.aws/nginx/nginx:1.31.6
+      - image: public.ecr.aws/nginx/nginx:1.31.3
         name: nginx
         ports:
         - containerPort: 80
